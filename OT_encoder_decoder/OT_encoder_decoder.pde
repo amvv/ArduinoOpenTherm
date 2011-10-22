@@ -11,10 +11,17 @@
  */
 
 #include <OpTh.h>
+#include <PortsLCD.h>
+#include <RF12.h> // needed to avoid a linker error :(
 
 #define OUTPUT_PIN (6)//for use with JeeNodeUSB
 #define SLAVE_GOOD_LED (15)
 #define SLAVE_BAD_LED  (5)
+
+#define DEG (char)223  // degree character
+
+
+int OTperiod = 1000;
 
 /* Timer2 reload value, globally available */
 unsigned int tcnt2;
@@ -47,6 +54,8 @@ byte MM4=0;
 
 
 OpTh OT = OpTh();  // create new OpTh class instance
+PortI2C myI2C (1);
+LiquidCrystalI2C lcd (myI2C);
 
 
 /* Setup phase: configure and enable timer2 overflow interrupt */
@@ -56,8 +65,12 @@ void setup() {
   /* Configure the test pin as output */
   pinMode(OUTPUT_PIN, OUTPUT); 
 
+  lcd.begin(16, 2);
+  // Print a message to the LCD.
+  lcd.print("Hello, world!");
+
   OT.init();
-  OT.setPeriod(1000);
+  OT.setPeriod(OTperiod);
 
   StopInterrupts();
 
@@ -95,7 +108,7 @@ void StartInterrupts()
   /* Save value globally for later reload in ISR */
   tcnt2 = 192; 
 
-  /* Finally load end enable the timer */
+  /* Finally load and enable the timer */
   TCNT2 = tcnt2;
   TIMSK2 |= (1<<TOIE2);
 
@@ -253,31 +266,42 @@ void loop() {
     OT.waitFrame();
     error_reading_frame = OT.readFrame();
     
+      lcd.setCursor(0, 1);
+
+    
+    
   if (error_reading_frame == 1)
   {
-      digitalWrite(SLAVE_BAD_LED, HIGH);
+      lcd.print("bad data");
   }
   else
   if (error_reading_frame == 2)
   {
-      digitalWrite(SLAVE_BAD_LED, HIGH);
+      lcd.print("start");
+  }
+  else
+  if (error_reading_frame == 12)
+  {
+      lcd.print("stop");
   }
   else
   if (error_reading_frame == 3)
   {
-      digitalWrite(SLAVE_BAD_LED, HIGH);
+      lcd.print("parity error");
   }
   else
   if (error_reading_frame == 0)
   {
-      digitalWrite(SLAVE_GOOD_LED, HIGH);
+      lcd.print("OK: ");
+      lcd.print(OTperiod);
+      display_frame();
   }
   else
   {
-      digitalWrite(SLAVE_BAD_LED, HIGH);
+      lcd.print("other error");
   }
     
-    delay(850);
+    delay(950);
 //    if (error_reading_frame == 10)
 //    {
 //      digitalWrite(SLAVE_BAD_LED, HIGH);
@@ -292,7 +316,7 @@ void loop() {
     {
       MM1=0x00;//parity is 0
       MM2=0x00;//0 bit set
-      MM3=0x00;//SHOULD BE 0x03 in order for the boiler to work!!!!!
+      MM3=0x03;//SHOULD BE 0x03 in order for the boiler to work!!!!!
       MM4=0x00;
 //      cycles = 0;
     }
@@ -320,6 +344,11 @@ void loop() {
       MM4=0x00;
       cycles = 0;
     }
+    
+      lcd.setCursor(15, 1);
+      lcd.print(cycles);
+
+    
     Serial.println();
     done = false;
     //check radio
@@ -331,6 +360,81 @@ void loop() {
     //Serial.print(" - ");
     StartInterrupts();
   }
+}
+
+void display_frame() {
+  byte msg_type = OT.getMsgType();
+  byte data_id = OT.getDataId();
+  unsigned int data_value = OT.getDataValue();
+
+      lcd.setCursor(0,0);
+
+      lcd.print((int)data_id);
+      lcd.print(":");
+      lcd.print(data_value);
+      lcd.print("  ");
+
+      lcd.setCursor(8,0);
+
+      switch(data_id) {
+        case 1:  // Control setpoint
+          if (OT.isMaster()) {
+            int t = data_value / 256;  // don't care about decimal values
+            lcd.print("set burner to ");
+            lcd.print(t);
+            lcd.print("C");
+          }
+        break;
+        case 16:  // room setpoint
+          if (OT.isMaster()) {
+            float t = (float)data_value / 256;
+            lcd.print("room set to ");
+            lcd.print(t);
+            if (data_value % 256 == 0) {
+              lcd.print("C");
+            }
+          }
+        break;
+        case 24:  // room actual temperature
+          if (OT.isMaster()) {
+            float t = (float)data_value / 256;
+            lcd.print("Room temp ");
+            lcd.print(t);
+            if (data_value % 256 == 0) {
+              lcd.print(".0");
+            }
+            lcd.print("C");
+          }
+        break;
+        case 25:  // boiler temp
+          if (! OT.isMaster()) {
+            int t = data_value / 256;
+            lcd.print(t);
+            lcd.print(DEG);
+            lcd.print("C");
+          }
+        break;
+        case 0:  // status
+          if (! OT.isMaster()) {
+            if (data_value & 4) {  // perform bitmasking on status frame
+              lcd.print("DHW");
+            }
+            else if (data_value & 2) {
+              lcd.print("CH ");
+            }
+            else {
+              lcd.print("   ");
+            }
+            
+            if (data_value & 8) {
+              lcd.print("FLAME");
+            }
+            else {
+              lcd.print("     ");
+            }
+          }
+          break;
+      }  // switch  
 }
 
 
