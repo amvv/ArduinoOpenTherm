@@ -21,8 +21,6 @@
 #define DEG (char)223  // degree character
 
 
-int OTperiod = 1000;
-
 /* Timer2 reload value, globally available */
 unsigned int tcnt2;
 
@@ -31,6 +29,8 @@ int cycles = 0;
 int originalvalue = 0;
 int y;
 int bits_sent = 0;
+
+int temp_set_to = 0;
 
 byte bit_out = HIGH;
 boolean done = true;
@@ -70,7 +70,7 @@ void setup() {
   lcd.print("Hello, world!");
 
   OT.init();
-  OT.setPeriod(OTperiod);
+  OT.setPeriod(1000);
 
   StopInterrupts();
 
@@ -108,7 +108,7 @@ void StartInterrupts()
   /* Save value globally for later reload in ISR */
   tcnt2 = 192; 
 
-  /* Finally load and enable the timer */
+  /* Finally load end enable the timer */
   TCNT2 = tcnt2;
   TIMSK2 |= (1<<TOIE2);
 
@@ -277,12 +277,7 @@ void loop() {
   else
   if (error_reading_frame == 2)
   {
-      lcd.print("start");
-  }
-  else
-  if (error_reading_frame == 12)
-  {
-      lcd.print("stop");
+      lcd.print("ss bit error");
   }
   else
   if (error_reading_frame == 3)
@@ -292,8 +287,7 @@ void loop() {
   else
   if (error_reading_frame == 0)
   {
-      lcd.print("OK: ");
-      lcd.print(OTperiod);
+      lcd.print("OK:            ");
       display_frame();
   }
   else
@@ -301,7 +295,7 @@ void loop() {
       lcd.print("other error");
   }
     
-    delay(950);
+    delay(850);
 //    if (error_reading_frame == 10)
 //    {
 //      digitalWrite(SLAVE_BAD_LED, HIGH);
@@ -342,6 +336,7 @@ void loop() {
       MM2=0x01;
       MM3=0x26;
       MM4=0x00;
+      temp_set_to = MM3;
       cycles = 0;
     }
     
@@ -371,10 +366,11 @@ void display_frame() {
 
       lcd.print((int)data_id);
       lcd.print(":");
-      lcd.print(data_value);
+      lcd.print(data_value, HEX);
       lcd.print("  ");
 
       lcd.setCursor(8,0);
+      lcd.print("        ");
 
       switch(data_id) {
         case 1:  // Control setpoint
@@ -421,6 +417,7 @@ void display_frame() {
             }
             else if (data_value & 2) {
               lcd.print("CH ");
+              lcd.print(temp_set_to);
             }
             else {
               lcd.print("   ");
@@ -436,5 +433,4 @@ void display_frame() {
           break;
       }  // switch  
 }
-
 
