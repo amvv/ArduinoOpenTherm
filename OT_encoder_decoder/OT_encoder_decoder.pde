@@ -12,7 +12,6 @@
  * It sets the boiler to the received setpoint.
  *
  * TODO:
- * - Set set of messages to be exchanged, and corresponding periods.
  * - Clean up the code
  *   - handling of the message to the boiler
  * - Enter fail safe mode - independently control set point
@@ -26,6 +25,7 @@
  * - Control setpoint according to received message
  * - meaningfull messages on the display
  *   - nice pretty characters 
+ * - Set set of messages to be exchanged, and corresponding periods.
  */
 
 #include <OpTh.h>
@@ -52,92 +52,88 @@
 
 byte CH[8] = //OK
 {
-B00100,
-B01110,
-B11111,
-B11111,
-B10001,
-B10101,
-B10101,
-B11111
+  B00100,
+  B01110,
+  B11111,
+  B11111,
+  B10001,
+  B10101,
+  B10101,
+  B11111
 };
 byte DHW[8] = //OK
 {
-B00100,
-B00100,
-B01110,
-B11111,
-B00000,
-B10101,
-B00000,
-B10101
+  B00100,
+  B00100,
+  B01110,
+  B11111,
+  B00000,
+  B10101,
+  B00000,
+  B10101
 };
 byte OK[8] =
 {
-B00001,
-B00011,
-B00010,
-B00110,
-B10100,
-B11100,
-B11000,
-B01000
+  B00001,
+  B00011,
+  B00010,
+  B00110,
+  B10100,
+  B11100,
+  B11000,
+  B01000
 };
 byte NOK[8] =
 {
-B10001,
-B11011,
-B01110,
-B00100,
-B01110,
-B11011,
-B10001,
-B10001
+  B10001,
+  B11011,
+  B01110,
+  B00100,
+  B01110,
+  B11011,
+  B10001,
+  B10001
 };
 byte RF[8] =
 {
 
-B00011,
-B00000,
-B00110,
-B00001,
-B01100,
-B00010,
-B11000,
-B11000
+  B00011,
+  B00000,
+  B00110,
+  B00001,
+  B01100,
+  B00010,
+  B11000,
+  B11000
 };
 byte FLAME[8] =
 {
-B00100,
-B00100,
-B00110,
-B00110,
-B01111,
-B11011,
-B11011,
-B01110
+  B00100,
+  B00100,
+  B00110,
+  B00110,
+  B01111,
+  B11011,
+  B11011,
+  B01110
 };
 byte OTH[8] =
 {
-B00100,
-B11111,
-B10001,
-B10001,
-B10001,
-B10001,
-B10101,
-B11111
+  B00100,
+  B11111,
+  B10001,
+  B10001,
+  B10001,
+  B10001,
+  B10101,
+  B11111
 };
-
-
-
 
 /* Timer2 reload value, globally available */
 unsigned int tcnt2;
 
 /*my stuff amvv */
-int cycles = 0;
-int inner_cycles = 0;
+int cycles, total_cycles, inner_cycles = 0;
 int originalvalue = 0;
 int y;
 int bits_sent = 0;
@@ -149,34 +145,37 @@ boolean done = false;
 byte state = 0; //0 - start bit; 1 - message: 2 - stop bit
 
 typedef struct {
-        unsigned int house;
-	unsigned int device;
-	unsigned int seq;
-	byte temp;
-        byte CHtemp;
-        byte returntemp;
-        byte boilerstatus;
-} OpenThermData;
+  unsigned int house;
+  unsigned int device;
+  unsigned int seq;
+  byte temp;
+  byte CHtemp;
+  byte returntemp;
+  byte boilerstatus;
+} 
+OpenThermData;
 
 OpenThermData buf;
 
-
-//not yet used...
 typedef struct {
-  byte message_type;
-  byte data_id;
-  byte data_value_h;
-  byte data_value_l;
+  unsigned int house;
+  unsigned int device;
+  unsigned int seq;
+  unsigned int burner_starts;
+  unsigned int CH_pump_starts;
+  unsigned int DHW_pump_starts;
+  unsigned int DHW_burner_starts;
+  unsigned int burner_hours;
+  unsigned int CH_pump_hours;
+  unsigned int DHW_pump_hours;
+  unsigned int DHW_burner_hours;
 } 
-OTdata;
+OpenThermExtendedData;
 
+OpenThermExtendedData extbuf;
 
 //OTdata MM;
-byte MM1=0;
-byte MM2=0;
-byte MM3=0;
-byte MM4=0;
-
+byte MM1, MM2, MM3, MM4 = 0;
 
 OpTh OT = OpTh();  // create new OpTh class instance
 PortI2C myI2C (1);
@@ -188,7 +187,7 @@ byte rf_success = 0;
 void setup() {
 
   rf12_initialize(10, RF12_868MHZ, 212);
-  Serial.begin(19200);
+  //Serial.begin(19200);
   lcd.createChar(CHAR_CH,CH);
   lcd.createChar(CHAR_DHW,DHW);
   lcd.createChar(CHAR_RF,RF);
@@ -204,22 +203,35 @@ void setup() {
   lcd.backlight();
 
   // Print a message to the LCD.
-  
+
   lcd.write(CHAR_RF);
   lcd.write(CHAR_OT);
   lcd.write(CHAR_FLAME);
   lcd.write(CHAR_CH);
   lcd.write(CHAR_DHW);
-    
-  lcd.print(" T1 T2 Ts");
+
+  lcd.print(" Ti To Ts");
 
   buf.house = 192;
   buf.device = 4;
+  buf.seq = 0;
   buf.temp = 0;
   buf.CHtemp = 0;
   buf.returntemp = 0;
   buf.boilerstatus = 0;
   
+  extbuf.house = 192;
+  extbuf.device = 5;
+  extbuf.seq = 0;
+  extbuf.burner_starts = 0;
+  extbuf.CH_pump_starts = 0;
+  extbuf.DHW_pump_starts = 0;
+  extbuf.DHW_burner_starts = 0;
+  extbuf.burner_hours = 0;
+  extbuf.CH_pump_hours = 0;
+  extbuf.DHW_pump_hours = 0;
+  extbuf.DHW_burner_hours = 0;
+ 
   rf12_sleep(0);
 
   OT.init();
@@ -259,7 +271,7 @@ void StartInterrupts()
    * amvv note: don't know why I made it 192, if the result is 194, but it seems to work...
    */
   /* Save value globally for later reload in ISR */
-  
+
   tcnt2 = 192; 
 
   /* Finally load end enable the timer */
@@ -406,7 +418,6 @@ ISR(TIMER2_OVF_vect) {
 
 int error_reading_frame;
 
-int total_cycles = 0;
 
 /* Main loop.*/
 void loop() {
@@ -414,115 +425,133 @@ void loop() {
   if (done == true)
   {
     total_cycles++;
-
     OT.waitFrame();
     error_reading_frame = OT.readFrame();
 
-//uncomment the cycle below to get the measurement of the OT period, then adapt the #define above, and comment it again...
+    //uncomment the cycle below to get the measurement of the OT period, then adapt the #define above, and comment it again...
 
-//    if(total_cycles == 10)
-//    {    
-//      lcd.setCursor(0, 1);
-//      lcd.print("measuring");
-//      OT.measureOtPeriod();
-//      lcd.setCursor(0, 1);
-//      int perper = OT.getPeriod();
-//      lcd.print(perper);
-//      lcd.print("us");
-//    }
-    
-  lcd.setCursor(1, 1);
-  if (error_reading_frame == 1)
-  {
+    //    if(total_cycles == 10)
+    //    {    
+    //      lcd.setCursor(0, 1);
+    //      lcd.print("measuring");
+    //      OT.measureOtPeriod();
+    //      lcd.setCursor(0, 1);
+    //      int perper = OT.getPeriod();
+    //      lcd.print(perper);
+    //      lcd.print("us");
+    //    }
+
+    lcd.setCursor(1, 1);
+    if (error_reading_frame == 1)
+    {
       lcd.print("1");//bad data");
-  }
-  else
-  if (error_reading_frame == 2)
-  {
-      lcd.print("2");//ss bit error");
-  }
-  else
-  if (error_reading_frame == 3)
-  {
-      lcd.print("3");//parity error");
-  }
-  else
-  if (error_reading_frame == 0)
-  {
-      lcd.write(CHAR_OK);//OK:        ");
-      display_frame();
-  }
-  else
-  {
-      lcd.print("9");//other error");
-  }
-    
-     // Serial.println(total_cycles);
-     // query the server every 60 cycles for the setpoint
-    if ((total_cycles%40) == 3 || rf_success != 0)
+    }
+    else
+      if (error_reading_frame == 2)
+      {
+        lcd.print("2");//ss bit error");
+      }
+      else
+        if (error_reading_frame == 3)
+        {
+          lcd.print("3");//parity error");
+        }
+        else
+          if (error_reading_frame == 0)
+          {
+            lcd.write(CHAR_OK);//OK:        ");
+            display_frame();
+          }
+          else
+          {
+            lcd.print("9");//other error");
+          }
+
+    // Serial.println(total_cycles);
+    // query the server every 60 cycles for the setpoint
+    if ((total_cycles%60) == 3 || rf_success != 0)
     {
       //send radio data
-      
-      buf.seq = total_cycles;
+
+      buf.seq = buf.seq++;
       rf12_sleep(-1);
       while (!rf12_canSend())	// wait until sending is allowed
-       rf12_recvDone();
-     
-       rf12_sendStart(0, &buf, sizeof buf);
+          rf12_recvDone();
+
+      rf12_sendStart(0, &buf, sizeof buf);
       while (!rf12_canSend())	// wait until sending has been completed
-        rf12_recvDone();
-      
+          rf12_recvDone();
+
       delay(5);
-    //lcd.print("sent!");
-        
-     unsigned long ss;
-        
+      //lcd.print("sent!");
+
+      unsigned long ss;
+
       ss = millis();
-        
-        
+
+
       rf_success = rf_success++;
       byte sss=CHAR_NOK;
       lcd.setCursor(0,1);
-       
+
       //wait 300 miliseconds for a reply from the server. If none comes, go on, and retry in the next cycle
       while (millis() - ss < 300)
       {  
-         if (rf12_recvDone())
-         {
-            if (rf12_crc == 0)
-            {        
-              //lcd.print("OK");
-              //lcd.print((int)rf12_buf[9]);
-              if (rf12_buf[5] == 4) //received a pack from the boiler controller
-              {
-                sss=CHAR_OK;
-                rf_success = 0;
-                buf.temp = rf12_buf[9];
-                //break;
-              }
+        if (rf12_recvDone())
+        {
+          if (rf12_crc == 0)
+          {        
+            //lcd.print("OK");
+            //lcd.print((int)rf12_buf[9]);
+            if (rf12_buf[5] == 4) //received a pack from the boiler controller
+            {
+              sss=CHAR_OK;
+              rf_success = 0;
+              buf.temp = rf12_buf[9];
+              //break;
             }
           }
-       }//while
-       lcd.print(sss);
-       
-   
-       rf12_sleep(0);
-       
-       if (rf_success == MAX_RF12_RETRY)
-       {
-         rf_success = 0;
-         buf.temp = 0;
-       }
-       lcd.setCursor(14,0);
-       lcd.print((int)buf.temp);
+        }
+      }//while
+      lcd.print(sss);
+
+
+      rf12_sleep(0);
+
+      if (rf_success == MAX_RF12_RETRY)
+      {
+        rf_success = 0;
+        buf.temp = 0;
+      }
+      //lcd.setCursor(14,0);
+      //lcd.print((int)buf.temp);
     }
-    
-//This delay should be adjusted to stay within the tolerances, even when the communicating failed    
+    //send extended data once every 60000 cycles 
+    if ((total_cycles%36000) == 100)
+    {
+      //send radio data
+
+      extbuf.seq = extbuf.seq++;
+      rf12_sleep(-1);
+      while (!rf12_canSend())	// wait until sending is allowed
+          rf12_recvDone();
+
+      rf12_sendStart(0, &extbuf, sizeof extbuf);
+      while (!rf12_canSend())	// wait until sending has been completed
+          rf12_recvDone();
+
+      delay(5);
+      //lcd.print("sent!");
+
+      rf12_sleep(0);
+    }
+
+    //This delay should be adjusted to stay within the tolerances, even when the communicating failed    
     delay(850);
 
     cycles++;
-      lcd.setCursor(15,1);
-      lcd.print(cycles);
+    lcd.setCursor(15,1);
+    lcd.print(cycles);
 
     if (cycles == 1) //enable CH
     {
@@ -534,20 +563,25 @@ void loop() {
         MM4=0x00;
       }
       else
-      if (buf.temp > buf.CHtemp or flame == true) // this piece of logic should be properly debugged
-      {//there is demand
-        MM1=0x00;//parity is 0
-        MM2=0x00;//0 bit set
-        MM3=0x03;//DHW and CH enabled!!!!!
-        MM4=0x00;
-      }
-      else
-      { //no demand or comms error
-        MM1=0x80;//parity is 1
-        MM2=0x00;//0 bit set
-        MM3=0x02;//DHW enabled, but no CH enabled!!!!!
-        MM4=0x00;
-      }      
+// The "if/else" comented here is to switch off the circulation pump when it reaches the target.
+// however, this leads to longer times to cool down the circulation water and retriggering the heating
+// should be better arranged such that the pump can be switched off after a bit, but garanteeing that water
+// will still circulate.
+//
+//        if (buf.temp > buf.CHtemp or flame == true) // this piece of logic should be properly debugged
+//        {//there is demand
+          MM1=0x00;//parity is 0
+          MM2=0x00;//0 bit set
+          MM3=0x03;//DHW and CH enabled!!!!!
+          MM4=0x00;
+//        }
+//        else
+//        { //no demand or comms error
+//          MM1=0x80;//parity is 1
+//          MM2=0x00;//0 bit set
+//          MM3=0x02;//DHW enabled, but no CH enabled!!!!!
+//          MM4=0x00;
+//        }      
     }
 
     if (cycles == 2) //set water temp to 38 degress ADJUST TO RECEIVED TEMPERATURE AND PARITY
@@ -556,7 +590,7 @@ void loop() {
       MM2=0x01;
       MM3=buf.temp;
       MM4=0x00;
-      
+
       byte par = parity_even_bit(MM3);
       MM1 = MM1+8*par;
     }
@@ -575,7 +609,7 @@ void loop() {
       MM3=0x00;
       MM4=0x00;
     }
-    
+
     if (cycles == 5) // less frequent messages
     {
       inner_cycles++;
@@ -660,11 +694,11 @@ void loop() {
       }
       cycles = 0;
     }
-    
-//    lcd.setCursor(13, 1);
-//    lcd.print(total_cycles);
 
-    
+    //    lcd.setCursor(13, 1);
+    //    lcd.print(total_cycles);
+
+
     //Serial.println();
     done = false;
     //check radio
@@ -683,180 +717,185 @@ void display_frame() {
   byte data_id = OT.getDataId();
   unsigned int data_value = OT.getDataValue();
 
-unsigned int ut;
-int t;
-float f;
+  unsigned int ut;
+  int t;
+  float f;
 
 
-      switch(data_id) {
-          case 0:  // status
-            if (data_value & 4) {  // perform bitmasking on status frame
-              lcd.setCursor(3,1);
-              lcd.print(" ");//DHW
-              lcd.write(CHAR_OK);
-            }
-            else if (data_value & 2) {
-              lcd.setCursor(3,1);
-              lcd.write(CHAR_OK);
-              lcd.print(" ");//CH
-              //lcd.print(temp_set_to);
-            }
-            else {
-              lcd.setCursor(3,1);
-              lcd.print("  ");
-            }
-            
-            if (data_value & 8) {
-              lcd.setCursor(2,1);
-              lcd.write(CHAR_OK);
-              //lcd.print("!");//FLAME
-              flame = true;
-            }
-            else {
-              lcd.setCursor(2,1);
-              lcd.print(" ");
-              flame = false;
-            }
-            buf.boilerstatus = (byte)data_value;
-          break;
-        case 1:  // Control setpoint
-            t = data_value / 256;  // don't care about decimal values
-            buf.temp = (byte)t;
-            lcd.setCursor(12,1);
-            //lcd.print("set burner to ");
-            lcd.print(t);
-            //lcd.print("C");
-        break;
-        case 3:  //slave configs
-            //lcd.print("slave flags OK    ");
-        break;
-        
-        case 5:  //faults water and flame
-            //lcd.print("faults flags OK    ");
-        break;
-        
-        case 16:  // room setpoint
-            f = (float)data_value / 256;
-            //lcd.print("room set to ");
-            //lcd.print(f);
-            if (data_value % 256 == 0) {
-              //lcd.print("C");
-            }
-            //lcd.print("     ");
-        break;
-        case 17:  //modulation level
-            t = data_value / 256;  // don't care about decimal values
-            //lcd.print("modul: ");
-            //lcd.print(t);
-            //lcd.print("     ");
-        break;
-        case 18:  //water pressure
-            t = data_value / 256;  // don't care about decimal values
-            //lcd.print("H20 press: ");
-            //lcd.print(t);
-            //lcd.print("     ");
-        break;
-        case 19:  //DHW flow rate
-            t = data_value / 256;  // don't care about decimal values
-            //lcd.print("DHW rate: ");
-            //lcd.print(t);
-            //lcd.print("     ");
-        break;
-        case 25:  //CH temp
-            t = data_value / 256;  // don't care about decimal values
-            buf.CHtemp = (byte)t;
-            lcd.setCursor(6,1);
-            //lcd.print("CH temp: ");
-            lcd.print(t);
-            lcd.print(" ");
-        break;
-        case 26:  //DHW temp
-            t = data_value / 256;  // don't care about decimal values
-            //buf.CHtemp = (byte)t;
-            lcd.setCursor(6,1);
-            //lcd.print("DHW temp: ");
-            lcd.print(t);
-            lcd.print(" ");
-        break;
-        case 28:  //return temp
-            t = data_value / 256;  // don't care about decimal values
-            buf.returntemp = t;
-            lcd.setCursor(9,1);
-            //lcd.print("ret temp: ");
-            lcd.print(t);
-            lcd.print(" ");
-        break;
-        case 33:  //exhaust temp
-            t = data_value / 256;  // don't care about decimal values
-            //lcd.print("exh temp: ");
-            //lcd.print(t);
-            //lcd.print("     ");
-        break;
-        case 116:  //burner starts
-            ut = (unsigned int)data_value;  // don't care about decimal values
-            //lcd.print("bur st: ");
-            //lcd.print(ut);
-            //lcd.print("     ");
-        break;
-        case 117:  //CH pump starts
-            ut = (unsigned int)data_value;  // don't care about decimal values
-            //lcd.print("CH pump st: ");
-            //lcd.print(ut);
-            //lcd.print("     ");
-        break;
-        case 118:  //DHW starts
-            ut = (unsigned int)data_value;  // don't care about decimal values
-            //lcd.print("DHW st: ");
-            //lcd.print(ut);
-            //lcd.print("     ");
-        break;
-        case 119:  //DHW burner starts
-            ut = (unsigned int)data_value;  // don't care about decimal values
-            //lcd.print("DHW bur st: ");
-            //lcd.print(ut);
-            //lcd.print("     ");
-        break;
-        case 120:  //burner hours
-            ut = (unsigned int)data_value;  // don't care about decimal values
-            //lcd.print("bur h: ");
-            //lcd.print(ut);
-            //lcd.print("     ");
-        break;
-        case 121:  //CH pump hours
-            ut = (unsigned int)data_value;  // don't care about decimal values
-            //lcd.print("CH p h: ");
-            //lcd.print(ut);
-            //lcd.print("     ");
-        break;
-        case 122:  //DHW pump hours
-            ut = (unsigned int)data_value;  // don't care about decimal values
-            //lcd.print("DHW p h: ");
-            //lcd.print(ut);
-            //lcd.print("     ");
-        break;
-        case 123:  //DHW burner hours
-            ut = (unsigned int)data_value;  // don't care about decimal values
-            //lcd.print("DHW b h: ");
-            //lcd.print(ut);
-            //lcd.print("     ");
-        break; 
-        
-        case 24:  // room actual temperature
-          if (OT.isMaster()) {
-            float t = (float)data_value / 256;
-            //lcd.print("Room temp ");
-            //lcd.print(t);
-            if (data_value % 256 == 0) {
-              //lcd.print(".0");
-            }
-            //lcd.print("C");
-          }
-        break;
-        default:
-           //lcd.print("incorrect message ID   ");
-        break;
+  switch(data_id) {
+  case 0:  // status
+    if (data_value & 4) {  // perform bitmasking on status frame
+      lcd.setCursor(3,1);
+      lcd.print(" ");//DHW
+      lcd.write(CHAR_OK);
+    }
+    else if (data_value & 2) {
+      lcd.setCursor(3,1);
+      lcd.write(CHAR_OK);
+      lcd.print(" ");//CH
+      //lcd.print(temp_set_to);
+    }
+    else {
+      lcd.setCursor(3,1);
+      lcd.print("  ");
+    }
 
-      }  // switch  
+    if (data_value & 8) {
+      lcd.setCursor(2,1);
+      lcd.write(CHAR_OK);
+      //lcd.print("!");//FLAME
+      flame = true;
+    }
+    else {
+      lcd.setCursor(2,1);
+      lcd.print(" ");
+      flame = false;
+    }
+    buf.boilerstatus = (byte)data_value;
+    break;
+  case 1:  // Control setpoint
+    t = data_value / 256;  // don't care about decimal values
+    buf.temp = (byte)t;
+    lcd.setCursor(12,1);
+    //lcd.print("set burner to ");
+    lcd.print(t);
+    //lcd.print("C");
+    break;
+  case 3:  //slave configs
+    //lcd.print("slave flags OK    ");
+    break;
+
+  case 5:  //faults water and flame
+    //lcd.print("faults flags OK    ");
+    break;
+
+  case 16:  // room setpoint
+    f = (float)data_value / 256;
+    //lcd.print("room set to ");
+    //lcd.print(f);
+    if (data_value % 256 == 0) {
+      //lcd.print("C");
+    }
+    //lcd.print("     ");
+    break;
+  case 17:  //modulation level
+    t = data_value / 256;  // don't care about decimal values
+    //lcd.print("modul: ");
+    //lcd.print(t);
+    //lcd.print("     ");
+    break;
+  case 18:  //water pressure
+    t = data_value / 256;  // don't care about decimal values
+    //lcd.print("H20 press: ");
+    //lcd.print(t);
+    //lcd.print("     ");
+    break;
+  case 19:  //DHW flow rate
+    t = data_value / 256;  // don't care about decimal values
+    //lcd.print("DHW rate: ");
+    //lcd.print(t);
+    //lcd.print("     ");
+    break;
+  case 25:  //CH temp
+    t = data_value / 256;  // don't care about decimal values
+    buf.CHtemp = (byte)t;
+    lcd.setCursor(6,1);
+    //lcd.print("CH temp: ");
+    lcd.print(t);
+    lcd.print(" ");
+    break;
+  case 26:  //DHW temp - does not get reported properly in my boiler AMVV
+    t = data_value / 256;  // don't care about decimal values
+    //buf.CHtemp = (byte)t;
+    //lcd.setCursor(6,1);
+    //lcd.print("DHW temp: ");
+    //lcd.print(t);
+    //lcd.print(" ");
+    break;
+  case 28:  //return temp
+    t = data_value / 256;  // don't care about decimal values
+    buf.returntemp = t;
+    lcd.setCursor(9,1);
+    //lcd.print("ret temp: ");
+    lcd.print(t);
+    lcd.print(" ");
+    break;
+  case 33:  //exhaust temp
+    t = data_value / 256;  // don't care about decimal values
+    //lcd.print("exh temp: ");
+    //lcd.print(t);
+    //lcd.print("     ");
+    break;
+  case 116:  //burner starts
+    ut = (unsigned int)data_value;  // don't care about decimal values
+    extbuf.burner_starts = ut;
+    //lcd.print("bur st: ");
+    //lcd.print(ut);
+    //lcd.print("     ");
+    break;
+  case 117:  //CH pump starts
+    ut = (unsigned int)data_value;  // don't care about decimal values
+    extbuf.CH_pump_starts = ut;
+    //lcd.print("CH pump st: ");
+    //lcd.print(ut);
+    //lcd.print("     ");
+    break;
+  case 118:  //DHW starts
+    ut = (unsigned int)data_value;  // don't care about decimal values
+    extbuf.DHW_pump_starts = ut;
+    //lcd.print("DHW st: ");
+    //lcd.print(ut);
+    //lcd.print("     ");
+    break;
+  case 119:  //DHW burner starts
+    ut = (unsigned int)data_value;  // don't care about decimal values
+    extbuf.DHW_burner_starts = ut;
+    //lcd.print("DHW bur st: ");
+    //lcd.print(ut);
+    //lcd.print("     ");
+    break;
+  case 120:  //burner hours
+    ut = (unsigned int)data_value;  // don't care about decimal values
+    extbuf.burner_hours = ut;
+    //lcd.print("bur h: ");
+    //lcd.print(ut);
+    //lcd.print("     ");
+    break;
+  case 121:  //CH pump hours
+    ut = (unsigned int)data_value;  // don't care about decimal values
+    extbuf.CH_pump_hours = ut;
+    //lcd.print("CH p h: ");
+    //lcd.print(ut);
+    //lcd.print("     ");
+    break;
+  case 122:  //DHW pump hours
+    ut = (unsigned int)data_value;  // don't care about decimal values
+    extbuf.DHW_pump_hours = ut;
+    //lcd.print("DHW p h: ");
+    //lcd.print(ut);
+    //lcd.print("     ");
+    break;
+  case 123:  //DHW burner hours
+    ut = (unsigned int)data_value;  // don't care about decimal values
+    extbuf.DHW_burner_hours = ut;
+    //lcd.print("DHW b h: ");
+    //lcd.print(ut);
+    //lcd.print("     ");
+    break; 
+  case 24:  // room actual temperature
+    if (OT.isMaster()) {
+      float t = (float)data_value / 256;
+      //lcd.print("Room temp ");
+      //lcd.print(t);
+      if (data_value % 256 == 0) {
+        //lcd.print(".0");
+      }
+      //lcd.print("C");
+    }
+    break;
+  default:
+    //lcd.print("incorrect message ID   ");
+    break;
+
+  }  // switch  
 }
-
-
