@@ -33,10 +33,10 @@
 #include <RF12.h> // needed to avoid a linker error :(
 #include <util/parity.h>
 
-#define OUTPUT_PIN (6)//for use with JeeNodeUSB
+#define OUTPUT_PIN (4)//for use with JeeNodeUSB
 #define OTPERIOD (997) //used a little trick to find mine, see below in loop
 
-#define DEG (char)223  // degree character for lcd Output
+#define MAX_BOILER_TEMP (80)
 
 #define MAX_RF12_RETRY (3) //retry 3 times and then give up
 
@@ -133,7 +133,8 @@ byte OTH[8] =
 unsigned int tcnt2;
 
 /*my stuff amvv */
-int cycles, total_cycles, inner_cycles = 0;
+unsigned int cycles, inner_cycles = 0;
+unsigned int total_cycles = 55;
 int originalvalue = 0;
 int y;
 int bits_sent = 0;
@@ -178,7 +179,7 @@ OpenThermExtendedData extbuf;
 byte MM1, MM2, MM3, MM4 = 0;
 
 OpTh OT = OpTh();  // create new OpTh class instance
-PortI2C myI2C (1);
+PortI2C myI2C (3);
 LiquidCrystalI2C lcd (myI2C);
 
 byte rf_success = 0;
@@ -469,13 +470,13 @@ void loop() {
 
     // Serial.println(total_cycles);
     // query the server every 60 cycles for the setpoint
-    if ((total_cycles%60) == 3 || rf_success != 0)
+    if (total_cycles == 60 || rf_success != 0)
     {
       //send radio data
-
+      total_cycles = 0;
       buf.seq = buf.seq++;
       rf12_sleep(-1);
-      while (!rf12_canSend())	// wait until sending is allowed
+      while (!rf12_canSend())  // wait until sending is allowed
           rf12_recvDone();
 
       rf12_sendStart(0, &buf, sizeof buf);
@@ -507,7 +508,7 @@ void loop() {
             {
               sss=CHAR_OK;
               rf_success = 0;
-              buf.temp = rf12_buf[9];
+              buf.temp = min(rf12_buf[9], MAX_BOILER_TEMP);
               //break;
             }
           }
@@ -526,25 +527,26 @@ void loop() {
       //lcd.setCursor(14,0);
       //lcd.print((int)buf.temp);
     }
+    //REMOVED, this will never happen...not very interesting data yet
     //send extended data once every 60000 cycles 
-    if ((total_cycles%36000) == 100)
-    {
-      //send radio data
+    //if ((total_cycles%36000) == 100)
+    //{
+    //  //send radio data
 
-      extbuf.seq = extbuf.seq++;
-      rf12_sleep(-1);
-      while (!rf12_canSend())	// wait until sending is allowed
-          rf12_recvDone();
+    //  extbuf.seq = extbuf.seq++;
+    //  rf12_sleep(-1);
+    //  while (!rf12_canSend())	// wait until sending is allowed
+    //      rf12_recvDone();
 
-      rf12_sendStart(0, &extbuf, sizeof extbuf);
-      while (!rf12_canSend())	// wait until sending has been completed
-          rf12_recvDone();
+    //  rf12_sendStart(0, &extbuf, sizeof extbuf);
+    //  while (!rf12_canSend())	// wait until sending has been completed
+    //      rf12_recvDone();
 
-      delay(5);
-      //lcd.print("sent!");
+    //  delay(5);
+    //  //lcd.print("sent!");
 
-      rf12_sleep(0);
-    }
+    //  rf12_sleep(0);
+    //}
 
     //This delay should be adjusted to stay within the tolerances, even when the communicating failed    
     delay(850);
@@ -568,20 +570,20 @@ void loop() {
 // should be better arranged such that the pump can be switched off after a bit, but garanteeing that water
 // will still circulate.
 //
-//        if (buf.temp > buf.CHtemp or flame == true) // this piece of logic should be properly debugged
-//        {//there is demand
+        if (buf.temp > buf.returntemp + 2 or flame == true or buf.temp < buf.returntemp) // this piece of logic should be properly debugged
+        {//there is demand
           MM1=0x00;//parity is 0
           MM2=0x00;//0 bit set
           MM3=0x03;//DHW and CH enabled!!!!!
           MM4=0x00;
-//        }
-//        else
-//        { //no demand or comms error
-//          MM1=0x80;//parity is 1
-//          MM2=0x00;//0 bit set
-//          MM3=0x02;//DHW enabled, but no CH enabled!!!!!
-//          MM4=0x00;
-//        }      
+        }
+        else
+        { //no demand or comms error
+          MM1=0x80;//parity is 1
+          MM2=0x00;//0 bit set
+          MM3=0x02;//DHW enabled, but no CH enabled!!!!!
+          MM4=0x00;
+        }      
     }
 
     if (cycles == 2) //set water temp to 38 degress ADJUST TO RECEIVED TEMPERATURE AND PARITY
@@ -759,6 +761,7 @@ void display_frame() {
     lcd.setCursor(12,1);
     //lcd.print("set burner to ");
     lcd.print(t);
+    lcd.print(" ");
     //lcd.print("C");
     break;
   case 3:  //slave configs
@@ -801,6 +804,10 @@ void display_frame() {
     buf.CHtemp = (byte)t;
     lcd.setCursor(6,1);
     //lcd.print("CH temp: ");
+    if (t<10)
+    {
+      lcd.print(" ");
+    }
     lcd.print(t);
     lcd.print(" ");
     break;
