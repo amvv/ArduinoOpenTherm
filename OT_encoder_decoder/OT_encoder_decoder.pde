@@ -38,7 +38,9 @@
 
 #define MAX_BOILER_TEMP (80)
 
-#define MAX_RF12_RETRY (3) //retry 3 times and then give up
+#define REPORTING_PERIOD (60)
+#define REPORTING_DELTA  (5)
+#define MAX_RF12_RETRY (50) //retry 50 times and then give up
 
 //CHARACTER DEFINITIONS
 
@@ -144,6 +146,8 @@ byte flame = false;
 byte bit_out = HIGH;
 boolean done = false;
 byte state = 0; //0 - start bit; 1 - message: 2 - stop bit
+
+int reporting_cycles = REPORTING_PERIOD;
 
 typedef struct {
   unsigned int house;
@@ -469,12 +473,18 @@ void loop() {
           }
 
     // Serial.println(total_cycles);
-    // query the server every 60 cycles for the setpoint
-    if (total_cycles == 60 || rf_success != 0)
+    // query the server every REPORTING_PERIOD cycles for the setpoint
+    if (total_cycles == reporting_cycles || rf_success != 0)
     {
       //send radio data
       total_cycles = 0;
       buf.seq = buf.seq++;
+      
+      if (error_reading_frame > 0) //comms error with the boiler
+      {
+        buf.boilerstatus = 250 + error_reading_frame;
+      }
+      
       rf12_sleep(-1);
       while (!rf12_canSend())  // wait until sending is allowed
           rf12_recvDone();
@@ -493,7 +503,6 @@ void loop() {
 
       rf_success = rf_success++;
       byte sss=CHAR_NOK;
-      lcd.setCursor(0,1);
 
       //wait 300 miliseconds for a reply from the server. If none comes, go on, and retry in the next cycle
       while (millis() - ss < 300)
@@ -509,11 +518,20 @@ void loop() {
               sss=CHAR_OK;
               rf_success = 0;
               buf.temp = min(rf12_buf[9], MAX_BOILER_TEMP);
+              reporting_cycles = REPORTING_PERIOD + REPORTING_DELTA - rf12_buf[10];
+    lcd.setCursor(14,0);
+    lcd.print(reporting_cycles);
+
+              //HERE RESET CHTEMP, RETURNTEMP, BOILERSTATUS, TEMP
+              buf.CHtemp = 0;
+              buf.returntemp = 0;
+              buf.boilerstatus = 0;
               //break;
             }
           }
         }
       }//while
+      lcd.setCursor(0,1);
       lcd.print(sss);
 
 
@@ -552,8 +570,10 @@ void loop() {
     delay(850);
 
     cycles++;
-    lcd.setCursor(15,1);
-    lcd.print(cycles);
+//    lcd.setCursor(15,1);
+//    lcd.print(cycles);
+    lcd.setCursor(14,1);
+    lcd.print(total_cycles);
 
     if (cycles == 1) //enable CH
     {
@@ -753,7 +773,7 @@ void display_frame() {
       lcd.print(" ");
       flame = false;
     }
-    buf.boilerstatus = (byte)data_value;
+    buf.boilerstatus = max(buf.boilerstatus, (byte)data_value);
     break;
   case 1:  // Control setpoint
     t = data_value / 256;  // don't care about decimal values
@@ -801,7 +821,7 @@ void display_frame() {
     break;
   case 25:  //CH temp
     t = data_value / 256;  // don't care about decimal values
-    buf.CHtemp = (byte)t;
+    buf.CHtemp = max(buf.CHtemp, (byte)t);
     lcd.setCursor(6,1);
     //lcd.print("CH temp: ");
     if (t<10)
@@ -821,7 +841,7 @@ void display_frame() {
     break;
   case 28:  //return temp
     t = data_value / 256;  // don't care about decimal values
-    buf.returntemp = t;
+    buf.returntemp = max(buf.returntemp, byte(t));
     lcd.setCursor(9,1);
     //lcd.print("ret temp: ");
     lcd.print(t);
