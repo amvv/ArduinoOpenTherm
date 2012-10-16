@@ -26,6 +26,8 @@
  * - meaningfull messages on the display
  *   - nice pretty characters 
  * - Set set of messages to be exchanged, and corresponding periods.
+ *
+ * - now also receives the age of the set point, in seconds, which it uses to synchronise such as to ask for date soon after the calculation
  */
 
 #include <OpTh.h>
@@ -519,6 +521,8 @@ void loop() {
               rf_success = 0;
               buf.temp = min(rf12_buf[9], MAX_BOILER_TEMP);
               reporting_cycles = REPORTING_PERIOD + REPORTING_DELTA - rf12_buf[10];
+              reporting_cycles = max(10, reporting_cycles);
+              reporting_cycles = min(70, reporting_cycles);
     lcd.setCursor(14,0);
     lcd.print(reporting_cycles);
 
